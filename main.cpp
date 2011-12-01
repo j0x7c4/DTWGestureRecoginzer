@@ -6,7 +6,15 @@ void convertFromString(T &value, const std::string &s) {
   std::stringstream ss(s);
   ss >> value;
 }
-int ReadSequence ( FILE* fp, vector<vector<double>>& seq ) {
+void Split ( char* str, char* sep, vector<string>& token ) {
+  char * p = strtok(str,sep);
+  while ( p ) {
+    token.push_back(string(p));
+    p=strtok(NULL,sep);
+  }
+}
+//Edit this function for different data format
+int ReadData ( FILE* fp, vector<vector<double>>& seq ) {
   char tc[2];
   int dim,n;
   double t;
@@ -22,58 +30,96 @@ int ReadSequence ( FILE* fp, vector<vector<double>>& seq ) {
   }
   return 1;
 }
-int ReadFile ( char* data_file_name, char* label_file_name , DTWGestureRecognizer& dtw ) { 
+
+int ReadFile ( char* data_file_name, char* label , DTWGestureRecognizer& dtw ) { 
   int dim,m,n;
   double t;
-  FILE *fp_data, *fp_label;
-  char tc[2];
+  FILE *fp_data;
+  char ts[200];
 //parameters
   vector<string> tlabel;
 
   fp_data = fopen(data_file_name,"r");
   if ( !fp_data ) {
-    printf("Open data file failed!\n");
+    printf("Open %s failed!\n",data_file_name);
     return 1;
   }
-  fp_label = fopen(label_file_name,"r");
-  if ( !fp_label ) {
-    printf("Open label file failed!\n");
-    return 1;
-  }
-
-  //read label
-  fscanf(fp_label,"%d,%d",&m,&n);
-  //while ( fscanf(fp_label,"%d,%d",&m,&n)!=EOF ) {
-  fgets(tc,2,fp_label);
-  for ( int i=0 ; i<m ; i++ ) {
-    for ( int j=0 ; j<n ; j++ ) {
-      string ts;
-      while ( fscanf(fp_label,"%c",&tc)!=EOF ) {
-        if (tc[0]<'0' || tc[0]>'9' ) break;
-        ts.push_back(tc[0]);
-      }
-      tlabel.push_back(ts);
-    }
-  }
-  //}
-
-  fclose(fp_label);
 
   //read data
-  int k = 0;
+
   vector<vector<double>> tdata;
-  while ( ReadSequence(fp_data,tdata) ) {
-    //dtw.AddToGaussianModel(tdata,tlabel[k++]);
-    dtw.Add(tdata,tlabel[k++]);
+  while ( ReadData(fp_data,tdata) ) {
+    dtw.Add(tdata,string(label));
   }
   fclose(fp_data);
   return 0;
 }
+//Training
+void ClassicTraining ( char* list, DTWGestureRecognizer &dtw ) {
+  FILE *fp;
+  char data_file[100];
+  char label[100];
+  fp = fopen(list,"r");
+  if ( !fp ) {
+    fprintf(stderr,"Failed to open %s\n",list);
+    exit(1);
+  }
+  printf("***********Training Models************\n");
+  int data_size;
+  while ( fscanf(fp,"%d",&data_size)!= EOF ) {
+    fscanf(fp,"%s",label);
+    for ( int i=0 ; i<data_size ; i++ ) {
+      fscanf(fp,"%s",data_file);
+      printf("Reading data %s...",data_file);
+      if ( !ReadFile(data_file,label,dtw) ) {
+        printf("Success!\n");
+      }
+      else {
+        printf("Fail!\n");
+      }
+    }
+  }
+  fclose(fp);
+}
+void GaussianTraining ( char* list, DTWGestureRecognizer &dtw, char* label) {
+  FILE *fp;
+  char data_file[100];
+  fp = fopen(list,"r");
+  if ( !fp ) {
+    fprintf(stderr,"Failed to open %s\n",list);
+    exit(1);
+  }
+  printf("***********Training Models************\n");
+  int data_size;
+  fscanf(fp,"%d",&data_size);
+  fscanf(fp,"%s",label);
+  for ( int i=0 ; i<data_size ; i++ ) {
+    fscanf(fp,"%s",data_file);
+    printf("Reading data %s...",data_file);
+    if ( !ReadFile(data_file,label,dtw) ) {
+      printf("Success!\n");
+    }
+    else {
+      printf("Fail!\n");
+    }
+  }
+  fclose(fp);
+  printf("Start to align sequences...");
+  dtw.AliginSequence();
+  printf("Done!\n");
+  printf("Start to training label %s ",label);
+  if ( !dtw.Training(label) ) printf("Success!\n");
+  else printf("Fail!\n");
+}
 
-
+void ShowModel ( string label , DTWGestureRecognizer &dtw) {
+  printf("***********Show Models************\n");
+  printf("Label %s\n",label.c_str());
+  dtw.PrintModel(label);
+}
 int main (int argc, char **argv) {
   FILE *fp;
-  char data_file[100], label_file[100];
+  
   //parameters
   //-d dimension of feature vector
   //-th threshold
@@ -82,6 +128,7 @@ int main (int argc, char **argv) {
   //-ft path of test file
   //-fs save path of model data file
   //-fout 
+  int n;
   int dim=-1;
   int width=MAXINT;
   double threshold=0;
@@ -89,6 +136,7 @@ int main (int argc, char **argv) {
   char* ft_name =NULL;
   char* fsave_name = NULL;
   char* fout_name = NULL;
+  char* fm_list_name=NULL;
 
   for ( int i = 1 ; i<argc ; i+=2 ) {
     string p(argv[i]);
@@ -103,111 +151,136 @@ int main (int argc, char **argv) {
       width=atoi(value);
     }
     else if ( p=="-fin" ) {
-      fin_name = value;
+      fin_name = (char*)malloc(sizeof(char)*strlen(value));
+      strcpy(fin_name,value);
     }
     else if ( p=="-ft" ) {
-      ft_name = value;
+      ft_name = (char*)malloc(sizeof(char)*strlen(value));
+      strcpy(ft_name,value);
+    }
+    else if ( p== "-fm" ) {
+      fm_list_name = (char*)malloc(sizeof(char)*strlen(value));
+      strcpy(fm_list_name,value);
     }
     else if ( p=="-fs" ) {
-      fsave_name = value;
+      fsave_name = (char*)malloc(sizeof(char)*strlen(value));
+      strcpy(fsave_name,value);
     }
     else if ( p=="-fout" ) {
-      fout_name = value;
+      fout_name = (char*)malloc(sizeof(char)*strlen(value));
+      strcpy(fout_name,value);
     }
     else {
       printf("Wrong Parameters!\n");
       exit(1);
     }
   }
-  if ( !fin_name ) {
-    printf("We need a list file!\n");
-    exit(1);
-  }
+  
   if ( dim<0 ) {
     printf("We need a list file!\n");
     exit(1);
   }
-  
-  fp = fopen(fin_name,"r");
-  if ( !fp ) {
-    printf("Failed to open %s!\n",fin_name);
-    exit(1);
-  }
-
+  char label[100];
   DTWGestureRecognizer dtw(dim,width,threshold);
-
-  while ( fscanf(fp,"%s %s",data_file,label_file)!=EOF ) {
-    printf("Adding data %s %s...",data_file,label_file);
-    if ( !ReadFile(data_file,label_file,dtw) ) {
-      printf("Success!\n");
+  if ( fin_name ) {
+#ifdef GAUSSIAN
+    GaussianTraining(fin_name,dtw,label);
+#else
+    ClassicTraining(fin_name,dtw);
+#endif
+  }
+  if ( fm_list_name ) {
+    fp = fopen(fm_list_name,"r");
+    if ( !fp ) {
+      fprintf(stderr,"Failed to open %s...\n",fm_list_name);
+      exit(1);
     }
-    else {
-      printf("Fail!\n");
+    char fm_name[100];
+    while ( fscanf(fp,"%s",fm_name)!=EOF ) {
+      FILE *fm_p = fopen(fm_name,"r");
+      if ( !fm_p ) {
+        fprintf(stderr,"Failed to open %s\n",fm_name);
+        continue;
+      }
+      double v;
+      fscanf(fm_p,"%s",label);
+      fscanf(fm_p,"%d %d",&dim,&n);
+      vector<vector<vector<double>>> covariances(n,vector<vector<double>>(dim,vector<double>(dim,0)));
+      vector<vector<double>> means(n,vector<double>(dim,0));
+      for ( int i=0 ; i<n ; i++ ) {
+        for ( int j=0 ; j<dim ; j++ ) {
+          for ( int k = 0  ; k<dim ; k++ ) {
+            fscanf(fm_p,"%lf",&v);
+            covariances[i][j][k]=v;
+          }
+        }
+        for ( int j=0 ; j<dim ; j++ ) {
+          fscanf(fm_p,"%lf",&v);
+          means[i][j]=v;
+        }
+      }
+      dtw.SetGaussianModel(n,dim,covariances,means,string(label));
+      printf("Model %s loaded.\n",label);
+      fclose(fm_p);
     }
+    fclose(fp);
   }
-  fclose(fp);
-
-  vector<string> labels = dtw.GetLabels();
-/*
-  printf("***********Training Models************\n");
-  for ( int i=0 ; i<labels.size() ; i++ ) {
-    printf("Start to training label %s ",labels[i].c_str());
-    if ( !dtw.Learning(labels[i]) ) printf("Success!\n");
-    else printf("Fail!\n");
-  }
+  //vector<string> labels = dtw.GetUniqueLables();
+#ifdef GAUSSIAN
+  ShowModel(string(label),dtw);
+#endif
   
-  
-  printf("***********Show Models************\n");
-  for ( int i=0 ; i<labels.size() ; i++ ) {
-    printf("Label %s\n",labels[i].c_str());
-    dtw.PrintModel(labels[i]);
-  }
   //save model
   if ( fsave_name ) {
     fp = fopen(fsave_name,"w");
     if ( !fp ) {
-      printf("Failed to open %s!\n",fsave_name);
+      fprintf(stderr,"Failed to open %s!\n",fsave_name);
     }
-    else {
-      for ( int i=0 ; i<labels.size() ; i++ ) {
-        fprintf(fp,"%s\n",labels[i].c_str());
-        dtw.Save(fp,labels[i]);
-      }
-      printf("Saved!\n");
-      fclose(fp);
-    }
+    fprintf(fp,"%s\n",label);
+    dtw.Save(fp,label);
+    printf("Saved!\n");
+    fclose(fp);
   }
-*/
+
   //test
+  time_t t_begin, t_end;
   if ( ft_name ) {
+
     printf("***********Testing data************\n");
     vector<vector<double>> test_seq;
     fp = fopen(ft_name,"r");
     if ( !fp ) {
-      printf("Failed to open %s!\n",ft_name);
+      fprintf(stderr,"Failed to open %s!\n",ft_name);
     }
     else {
       char test_file[100];
-      int k;
+      int k=1;
       while ( fscanf(fp,"%s",test_file)!=EOF ) {
         FILE *fp_test = fopen(test_file,"r");
         if ( !fp_test ) {
-          printf("Failed to open %s!\n",test_file);
+          fprintf(stderr,"Failed to open %s!\n",test_file);
           continue;
         }
-        int k=1;
-        while ( ReadSequence(fp_test,test_seq) ) {
-          printf("Testing the %dth data in %s...",k,test_file);
+        int t=1;
+        while ( ReadData(fp_test,test_seq) ) {
+          printf("(%d) Testing data %d in %s...",k++,t++,test_file);
           double p;
           string res;
-          //res = dtw.RecognizeByGaussianModel(test_seq,p);
-          res = dtw.Recognize(test_seq);
-          //printf("%lf %s\n",p,res.c_str());
-          printf(" %s\n",res.c_str());
+          t_begin = time(NULL);
+#ifdef GAUSSIAN
+          res = dtw.RecognizeByGaussianModel(test_seq,p);
+#else 
+          res = dtw.Recognize(test_seq,p);
+#endif
+          t_end = time(NULL);
+          printf("%lf\n",p);
+          printf(" %s, time=%dms\n",res.c_str(),t_end-t_begin);
         }
+        fclose(fp_test);
       }
     }
+    fclose(fp);
   }
-  
+
   return 0;
 }

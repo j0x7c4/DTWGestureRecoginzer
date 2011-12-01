@@ -10,6 +10,11 @@ class GaussianModel {
   vector<cv::Mat> samples_;
 public:
   GaussianModel(){};
+  GaussianModel(int dim, const vector<vector<double>>& covar,const vector<double>& mean){
+    Init(dim);
+    SetCovarianceMatrix(covar);
+    SetMeanVector(mean);
+  };
   GaussianModel(int dim, vector<double> x) {
     cv::Mat sample = cv::Mat(x,true);
     samples_.push_back(sample);
@@ -24,6 +29,17 @@ public:
   //}
   int GetDim() {
     return dim_;
+  }
+  void SetCovarianceMatrix( const vector<vector<double>>& covar ) {
+    //c_ = cv::Mat(covar,true);
+    for ( int i = 0 ; i<dim_ ; i++ ) {
+      for ( int j = 0 ; j<dim_; j++ ) {
+        *((double*)c_.data+i*dim_+j) = covar[i][j];
+      }
+    }
+  }
+  void SetMeanVector(const vector<double>& mean) { 
+    u_ = cv::Mat(mean,true);
   }
   cv::Mat GetCovarianceMatrix ( ) {
     return c_;
@@ -43,7 +59,7 @@ public:
   }
   double GetProbability ( const vector<double>& x ) {
     cv::Mat test = cv::Mat(x,true);
-    cv::calcCovarMatrix(&samples_[0],samples_.size(),c_,u_,CV_COVAR_NORMAL);
+    //cv::calcCovarMatrix(&samples_[0],samples_.size(),c_,u_,CV_COVAR_NORMAL);
     //cout<<c_<<endl;
     //cout<<u_<<endl;
     double detC = cv::determinant(c_);

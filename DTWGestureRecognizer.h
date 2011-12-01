@@ -20,8 +20,11 @@ class DTWGestureRecognizer {
   int dim_;
   // Known sequences
   FeatureDataList known_sequences_;
+  // Aligned sequences
+  FeatureDataList aligned_sequences_;
   // Labels of those known sequences
   LabelDataList known_labels_;
+  LabelDataList unique_labels_;
   // Gaussian Model
   Map examples_;
   // Maximum DTW distance between an example and a sequence being classified.
@@ -37,7 +40,13 @@ class DTWGestureRecognizer {
   double Manhattan(FeatureData &a, FeatureData &b);
   // Computes a 2-distance between two observations. (aka Euclidian distance).
   double Euclidian(FeatureData &a, FeatureData &b);
-
+  void UniqueLabel ( ) {
+    LabelDataList::iterator it;
+    LabelDataList tlabels(known_labels_);
+    sort(tlabels.begin(),tlabels.end());
+    it = unique(tlabels.begin(),tlabels.end());
+    unique_labels_.assign(tlabels.begin(),it);
+  }
 public:
   DTWGestureRecognizer(int dim=1, int ws=MAXINT, double threshold=0, double firstThreshold=0);
   DTWGestureRecognizer(string,string,int ws=MAXINT, double threshold=0, double firstThreshold=0);
@@ -46,23 +55,40 @@ public:
   // Sequences may have different lengths.
   void Add(FeatureSequence seq, string l);
   void AddToGaussianModel(FeatureSequence seq, string l);
-  
+  //Read from saved model
+  void SetGaussianModel(int,int, vector<vector<vector<double>>>,vector<vector<double>>,string);
   // Recognize gesture in the given sequence.
   // It will always assume that the gesture ends on the last observation of that sequence.
   // If the distance between the last observations of each sequence is too great, or if the overall DTW distance between the two sequence is too great, no gesture will be recognized.
-  string Recognize(FeatureSequence seq);
+  string Recognize(FeatureSequence seq, double& p);
   string RecognizeByGaussianModel(FeatureSequence seq,double& p);
   // Compute the min DTW distance between seq2 and all possible endings of seq1.
-  double dtw(FeatureSequence seq1, FeatureSequence seq2,int constraint=MAXINT);
-  double dtw(FeatureSequence seq,vector<GaussianModel> example_model, int constraint=MAXINT);
+  double dtw(FeatureSequence seq, FeatureSequence base, int constraint=MAXINT);
+  double dtw(FeatureSequence seq, FeatureSequence base, vector<int>& mapping, int constraint=MAXINT);
+  double dtw(FeatureSequence seq, vector<GaussianModel> example_model, int constraint=MAXINT);
+  double dtw(FeatureSequence seq, vector<GaussianModel> example_model, vector<int>& mapping, int constraint=MAXINT);
+  
   int GetLabelNumber ( ) {
+
     return known_labels_.size();
   }
   LabelDataList GetLabels () {
     return known_labels_;
   }
+  string GetUniqueLabel() {
+    return known_labels_[0];
+  }
+  LabelDataList GetUniqueLables ( ){
+    UniqueLabel();
+    return unique_labels_;
+  }
   void Save (FILE* fp, string label);
   void PrintModel (string label);
   void ShowGM();
   int Learning(string);
+  int Training(string);
+  //Normalize the length of training data for Gaussian Model
+  int DTWGestureRecognizer::SelectBase ( int n, vector<FeatureSequence>& seq );
+  void NormalizeSequence(int,vector<FeatureSequence>&,vector<FeatureSequence>&);
+  void AliginSequence( );
 };

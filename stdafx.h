@@ -7,3 +7,6 @@
 #include<math.h>
 #include<stdio.h>
 using namespace std;
+
+//#define SHOWALIGNED
+#define GAUSSIAN

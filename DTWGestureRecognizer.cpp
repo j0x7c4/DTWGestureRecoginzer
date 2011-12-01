@@ -91,36 +91,41 @@ void DTWGestureRecognizer::AddToGaussianModel(FeatureSequence seq, string l) {
     }
   }
 }
-string DTWGestureRecognizer::Recognize(FeatureSequence seq) {
-  double min_dist(INF);
+string DTWGestureRecognizer::Recognize(FeatureSequence seq,double& p) {
+  double min_dist(global_threshold_);
   string _class = "UNKNOWN";
   for(int i=0 ; i<known_sequences_.size() ;i++) {
     FeatureSequence example = known_sequences_[i];
-    //if (Euclidian(seq[seq.size()-1], example[seq.size()-1]) < first_threshold_) {
     double d = dtw(seq, example) / (example.size());
     if (d < min_dist){
       min_dist = d;
       _class = (string)(known_labels_[i]);
     }
-    //}
   }
+  p = min_dist;
   return (min_dist<global_threshold_ ? _class : "UNKNOWN")/*+" "+minDist.ToString()*/ ;
 }
 
 string DTWGestureRecognizer::RecognizeByGaussianModel(FeatureSequence seq, double& po) {
-  double max_probability(0);
+  double min_distance(global_threshold_);
+  vector<int> mapping,t_mapping;
   string _class = "UNKNOWN";
   for(map<string,vector<GaussianModel>>::iterator iter=examples_.begin(); iter!=examples_.end(); iter++) {
     vector<GaussianModel> example = iter->second;  
-    double p = dtw(seq, example);
-    if (p > max_probability){
-      max_probability = p;
+    double p = dtw(seq, example,t_mapping,example.size()/5);
+    if (p < min_distance){
+      min_distance = p;
       _class = (string)(iter->first);
+      mapping = t_mapping;
     }
   }
-  po = max_probability;
-  printf("%lf ",max_probability);
-  return (max_probability>global_threshold_ ? _class : "UNKNOWN")/*+" "+minDist.ToString()*/ ;
+  po = min_distance;
+  printf("\n");
+  for ( int i=0 ; i<mapping.size() ; i++ ) {
+    printf("base %d, test %d\n",i,mapping[i]);
+  }
+  //return _class;
+  return (min_distance<global_threshold_ ? _class : "UNKNOWN")/*+" "+minDist.ToString()*/ ;
 }
 void DTWGestureRecognizer::ShowGM ( ) {
   for ( Map::iterator i = examples_.begin() ; i!=examples_.end() ; i++ ) {
@@ -128,7 +133,6 @@ void DTWGestureRecognizer::ShowGM ( ) {
       cout<<"*************"<<endl;
       j->Show();
     }
-    
   }
 }
 // Computes a 1-distance between two observations. (aka Manhattan distance).
@@ -150,33 +154,91 @@ double DTWGestureRecognizer::Euclidian(FeatureData &a, FeatureData &b) {
 }
 
  // Compute the min DTW distance between seq2 and all possible endings of seq1.
-double DTWGestureRecognizer::dtw(FeatureSequence seq1, FeatureSequence seq2, int constraint){
+double DTWGestureRecognizer::dtw(FeatureSequence seq, FeatureSequence base, int constraint){
   // Init
-  int m(
-    seq1.size());
-  int n(seq2.size());
+  int m(seq.size());
+  int n(base.size());
   double cost;
-  vector<vector<double>> tab(m+1,vector<double>(n+1,0.0));
-
-  for(int i=0 ; i<=m ; i++){
-    for(int j=0 ; j<=n ; j++){
-      tab[i][j]=INF ;
-    }
-  }
+  vector<vector<double>> tab(m+1,vector<double>(n+1,global_threshold_));
   tab[0][0]=0 ;
 
   // Dynamic computation of the DTW matrix.
   for(int i=1 ; i<=m ; i++){
     for(int j=MAX(1,i-constraint) ; j<=MIN(n,i+constraint) ; j++){
-      cost = Euclidian(seq1[i-1],seq2[j-1]);
+      cost = Euclidian(seq[i-1],base[j-1]);
       tab[i][j] = cost + MIN(tab[i-1][j-1],MIN(tab[i-1][j],tab[i][j-1]));
     }
   }
-
+  if ( constraint < base.size() ) return tab[m][n];
   // Find best between seq2 and an ending (postfix) of seq1.
-  double best_match = INF;
+  double best_match = global_threshold_;
   for (int i = 1; i <= m; i++) {
     best_match = MIN(best_match,tab[i][n]);
+  }
+  return best_match;
+}
+
+double DTWGestureRecognizer::dtw(FeatureSequence seq, FeatureSequence base, vector<int>& mapping, int constraint){
+  // Init
+  
+  int m(seq.size());
+  int n(base.size());
+  double cost;
+  mapping.clear();
+  mapping.resize(n);
+  vector<vector<double>> tab(m+1,vector<double>(n+1,global_threshold_));
+  vector<vector<int>> trace_mat_x(m+1,vector<int>(n+1,0));
+  vector<vector<int>> trace_mat_y(m+1,vector<int>(n+1,0));
+  tab[0][0]=0 ;
+
+  // Dynamic computation of the DTW matrix.
+  for(int i=1 ; i<=m ; i++){
+    for(int j=MAX(1,i-constraint) ; j<=MIN(n,i+constraint) ; j++){
+      cost = Euclidian(seq[i-1],base[j-1]);
+      if ( tab[i-1][j-1] < tab[i-1][j] && tab[i-1][j-1] < tab[i][j-1] ) {
+        tab[i][j] = cost + tab[i-1][j-1];
+        trace_mat_x[i][j]=i-1;
+        trace_mat_y[i][j]=j-1;
+      }
+      else if ( tab[i][j-1] < tab[i-1][j] && tab[i][j-1] < tab[i-1][j-1] ) {
+        tab[i][j] = cost + tab[i][j-1];
+        trace_mat_x[i][j]=i;
+        trace_mat_y[i][j]=j-1;
+      }
+      else if ( tab[i-1][j] < tab[i-1][j-1] && tab[i-1][j] < tab[i-1][j-1] ) {
+        tab[i][j] = cost + tab[i-1][j];
+        trace_mat_x[i][j]=i-1;
+        trace_mat_y[i][j]=j;
+      }
+    }
+  }
+  if ( constraint < base.size() ) {
+    int x = m, y = n;
+    int tx,ty;
+    while ( x && y ) {
+      mapping[y-1] = x-1;
+      tx = trace_mat_x[x][y];
+      ty = trace_mat_y[x][y];
+      x = tx , y = ty;
+    }
+    return tab[m][n];
+  }
+  // Find best between seq2 and an ending (postfix) of seq1.
+  double best_match = global_threshold_;
+  int best_match_pos;
+  for (int i = 1; i <= m; i++) {
+    if ( best_match > tab[i][n] ) {
+      best_match = tab[i][n];
+      best_match_pos = i;
+    }
+  }
+  int x = best_match_pos, y = n;
+  int tx,ty;
+  while ( x && y ) {
+    mapping[y-1] = x-1;
+    tx = trace_mat_x[x][y];
+    ty = trace_mat_y[x][y];
+    x = tx , y = ty;
   }
   return best_match;
 }
@@ -187,29 +249,97 @@ double DTWGestureRecognizer::dtw(FeatureSequence seq, vector<GaussianModel> exam
   int n(example_model.size());
   int m(seq.size());
   double p,t;
-  vector<vector<double>> tab(m+1,vector<double>(n+1,0.0));
-
-  for(int i=0 ; i<=m ; i++){
-    for(int j=0 ; j<=n ; j++){
-      tab[i][j]=0 ;
-    }
-  }
-  tab[0][0]=1 ;
+  vector<vector<double>> tab(m+1,vector<double>(n+1,global_threshold_));
+  tab[0][0]=0 ;
 
   // Dynamic computation of the DTW matrix.
   for(int i=1 ; i<=m ; i++){
     for(int j=MAX(1,i-constraint) ; j<=MIN(n,i+constraint) ; j++){
       p = -log(example_model[j-1].GetProbability(seq[i-1],example_model[j-1].GetCovarianceMatrix(),example_model[j-1].GetMeanVector()));
-      t = MAX(tab[i-1][j-1],MAX(tab[i-1][j],tab[i][j-1]));
+      t = MIN(tab[i-1][j-1],MIN(tab[i-1][j],tab[i][j-1]));
       tab[i][j] = p + t;
     }
   }
-
+  if ( constraint < example_model.size() ) return tab[m][n];
   // Find best between seq and an ending (postfix).
-  double best_match = 0;
+  double best_match = global_threshold_;
+  int best_pos;
   for (int i = 1; i <= m; i++) {
-    best_match = MAX(best_match,tab[i][n]);
+    if ( best_match > tab[i][n] ) {
+      best_match = tab[i][n];
+      best_pos = i;
+    }
+    best_match = MIN(best_match,tab[i][n]);
   }
+  return best_match;
+}
+// Compute the max probablity of a model to seq and all possible endings in model.
+double DTWGestureRecognizer::dtw(FeatureSequence seq, vector<GaussianModel> example_model,  vector<int>& mapping, int constraint){
+  // Init
+  int n(example_model.size());
+  int m(seq.size());
+  double p,t;
+  vector<vector<double>> tab(m+1,vector<double>(n+1,global_threshold_));
+  mapping.resize(n,0);
+  vector<vector<int>> trace_x(m+1,vector<int>(n+1,0));
+  vector<vector<int>> trace_y(m+1,vector<int>(n+1,0));
+  tab[0][0]=0 ;
+
+  // Dynamic computation of the DTW matrix.
+  for(int i=1 ; i<=m ; i++){
+    for(int j=MAX(1,i-constraint) ; j<=MIN(n,i+constraint) ; j++){
+      p = -log(example_model[j-1].GetProbability(seq[i-1],example_model[j-1].GetCovarianceMatrix(),example_model[j-1].GetMeanVector()));
+      if ( tab[i-1][j-1] < tab[i-1][j] && tab[i-1][j-1] < tab[i][j-1] ) {
+        t = tab[i-1][j-1];
+        trace_x[i][j] = i-1;
+        trace_y[i][j] = j-1;
+      }
+      else if ( tab[i-1][j] < tab[i-1][j-1] && tab[i-1][j] < tab[i][j-1] ) {
+        t = tab[i-1][j];
+        trace_x[i][j] = i-1;
+        trace_y[i][j] = j;
+      }
+      else if ( tab[i][j-1] < tab[i-1][j] && tab[i][j-1] < tab[i-1][j-1] ) {
+        t = tab[i][j-1];
+        trace_x[i][j] = i;
+        trace_y[i][j] = j-1;
+      }
+      tab[i][j] = p + t;
+    }
+  }
+  
+  if ( constraint < example_model.size() ) {
+    int x = m, y = n;
+    int tx,ty;
+    while ( x && y ) {
+      mapping[y-1] = x-1;
+      tx = trace_x[x][y];
+      ty = trace_y[x][y];
+      x = tx , y = ty;
+    }
+    return tab[m][n];
+  }
+  
+  // Find best between seq and an ending (postfix).
+  double best_match = global_threshold_;
+  int best_pos=0;
+  for (int i = 1; i <= m; i++) {
+    if ( best_match > tab[i][n] ) {
+      best_match = tab[i][n];
+      best_pos = i;
+    }
+    best_match = MIN(best_match,tab[i][n]);
+  }
+  
+  int x = best_pos, y = n;
+  int tx,ty;
+  while ( x && y ) {
+    mapping[y-1] = x-1;
+    tx = trace_x[x][y];
+    ty = trace_y[x][y];
+    x = tx , y = ty;
+  }
+  
   return best_match;
 }
 //Get every model trained
@@ -224,6 +354,13 @@ int DTWGestureRecognizer::Learning (string label) {
         return 1;
       }
   }
+  return 0;
+}
+int DTWGestureRecognizer::Training ( string label ) {
+  for ( int i=0 ; i<aligned_sequences_.size() ; i++ ) {
+    AddToGaussianModel(aligned_sequences_[i],label);
+  }
+  Learning(label);
   return 0;
 }
 //Store every model in a file
@@ -263,8 +400,6 @@ void DTWGestureRecognizer::PrintModel (string label) {
       cv::Mat c(iter_frame->GetCovarianceMatrix());
       cv::Mat u(iter_frame->GetMeanVector());
       int dim = iter_frame->GetDim();
-      //printf("%d\n",dim); //output dimension
-      //output covariance matrix
       for ( int i=0 ; i<dim ; i++ ) {
         if ( i ) printf("\n");
         for ( int j=0 ; j<dim ; j++ ) {
@@ -277,5 +412,73 @@ void DTWGestureRecognizer::PrintModel (string label) {
       for ( int i=0 ; i<dim ; i++ ) {
         printf("%lf\n",*((double*)u.data+i));
       }
+  }
+}
+//Nomarlize
+int DTWGestureRecognizer::SelectBase ( int n, vector<FeatureSequence>& seq ) {
+  int norm_id=0;
+  double norm_err=MAXLONG;
+  vector<vector<double>> err_mat(n,vector<double>(n,0));
+  for ( int i=0 ; i<n ; i++ ) {
+    for ( int j=i+1 ; j<n ; j++ ) {
+      err_mat[i][j]= err_mat[j][i] = dtw(seq[i],seq[j],seq[i].size()/10);
+    }
+  }
+  double sum;
+  for ( int i=0 ; i<n ; i++ ) {
+    sum = 0;
+    for ( int j =0 ; j<n ; j++ ) {
+      if ( j==i ) continue;
+      sum+=err_mat[i][j];
+    }
+    if ( norm_err>sum/(n-1) ) {
+      norm_err = sum/(n-1);
+      norm_id = i;
+    }
+  }
+#ifdef SHOWALIGNED
+  FILE *fp = fopen("E:\\debug_align_sequence.txt","a");
+  fprintf(fp,"Base id:%d\n",norm_id);
+  fclose(fp);
+#endif
+  return norm_id;
+}
+void DTWGestureRecognizer::NormalizeSequence(int n, vector<FeatureSequence>& before,vector<FeatureSequence>& after) {
+  int base_id = SelectBase(n,before);
+  int base_size = before[base_id].size();
+  after.resize(n,FeatureSequence(base_size,vector<double>(dim_,0)));
+  for ( int i=0 ; i<n ; i++ ) {
+    if ( i==base_id ) {
+      after[i]=before[base_id];
+    }
+    vector<int> mapping;
+    dtw(before[i],before[base_id],mapping,before[i].size()/10);
+    for ( int j=0 ; j<base_size ; j++ ) {
+      after[i][j] = before[i][mapping[j]];
+    }
+  }
+}
+void DTWGestureRecognizer::AliginSequence( ){
+  int n = known_sequences_.size();
+  NormalizeSequence(n,known_sequences_,aligned_sequences_);
+#ifdef SHOWALIGNED
+  FILE *fp = fopen("E:\\debug_align_sequence.txt","a");
+  for ( int i = 0 ; i<n ; i++ ) {
+    fprintf(fp,"known sequence %d,length = %d\n",i,known_sequences_[i].size());
+    for ( int j = 0 ; j<known_sequences_[i].size() ; j++ ) {
+      fprintf(fp,"%d:(%lf,%lf)\n",j,known_sequences_[i][j][0],known_sequences_[i][j][1]);
+    }
+    fprintf(fp,"aligned sequence %d,length = %d\n",i,aligned_sequences_[i].size());
+    for ( int j = 0 ; j<aligned_sequences_[i].size() ; j++ ) {
+      fprintf(fp,"%d:(%lf,%lf)\n",j,aligned_sequences_[i][j][0],aligned_sequences_[i][j][1]);
+    }
+  }
+  fclose(fp);
+#endif
+}
+
+void DTWGestureRecognizer::SetGaussianModel(int n, int dim, vector<vector<vector<double>>> covariances,vector<vector<double>> means,string label) {
+  for ( int i=0 ; i<n ; i++ ) {
+    examples_[label].push_back(GaussianModel(dim,covariances[i],means[i]));
   }
 }
